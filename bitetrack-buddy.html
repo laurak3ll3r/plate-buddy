@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BiteTrack + Plate Buddy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.10.0/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:            #f5f2ed;
+      --surface:       #ffffff;
+      --surface-2:     #f0ede8;
+      --border:        #e0dbd3;
+      --text-primary:  #1a1714;
+      --text-secondary:#6b6460;
+      --accent:        #d4770a;
+      --accent-light:  #fef3e2;
+      --accent-dark:   #a85c08;
+      --success:       #2e7d4f;
+      --danger:        #c0392b;
+      --danger-light:  #fdecea;
+      --shadow-sm:     0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.05);
+      --radius:        14px;
+      --radius-sm:     8px;
+      --font-display:  'Syne', sans-serif;
+      --font-mono:     'DM Mono', monospace;
+      --transition:    0.2s ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: var(--font-display);
+      background: var(--bg);
+      color: var(--text-primary);
+      min-height: 100dvh;
+      padding-bottom: 40px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    }
+
+    /* ── Header ── */
+    .app-header {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px;
+      background: rgba(245,242,237,0.9);
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { font-family: var(--font-display); font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em; color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+    .logo-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+
+    /* ── Status Badge ── */
+    .status-badge { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 10px; border-radius: 99px; transition: var(--transition); }
+    .status-idle   { background: var(--surface-2); color: var(--text-secondary); }
+    .status-ready  { background: #e8f4ec; color: var(--success); }
+    .status-eating { background: var(--accent-light); color: var(--accent-dark); }
+    .status-done   { background: #eef2ff; color: #3730a3; }
+
+    /* ── Layout ── */
+    .main-content { padding: 18px 16px; display: flex; flex-direction: column; gap: 14px; max-width: 480px; margin: 0 auto; }
+
+    /* ── Cards ── */
+    .card { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 20px; box-shadow: var(--shadow-sm); }
+    .card-title { font-family: var(--font-display); font-weight: 700; font-size: 0.95rem; letter-spacing: -0.01em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 6px; }
+    .card-subtitle { font-size: 0.875rem; color: var(--text-secondary); line-height: 1.5; margin-bottom: 16px; }
+
+    /* ── Buttons ── */
+    .btn { font-family: var(--font-display); font-weight: 600; font-size: 0.9rem; border: none; border-radius: var(--radius-sm); padding: 11px 20px; cursor: pointer; transition: opacity var(--transition), transform var(--transition), background var(--transition); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+    .btn:active  { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.38; pointer-events: none; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { opacity: 0.9; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-danger:hover { opacity: 0.9; }
+    .btn-ghost { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--border); }
+    .btn-full { width: 100%; }
+    .controls-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .controls-row .btn { flex: 1; min-width: 90px; }
+
+    /* ── Camera ── */
+    .camera-wrap { position: relative; width: 100%; background: #0d0d0d; border-radius: var(--radius-sm); overflow: hidden; aspect-ratio: 4/3; border: 1px solid var(--border); }
+    .camera-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: rgba(255,255,255,0.4); font-family: var(--font-mono); font-size: 0.8rem; }
+    .camera-placeholder .cam-icon { font-size: 2.5rem; opacity: 0.3; }
+    .camera-placeholder.hidden { display: none; }
+    #videoEl { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity 0.4s ease; }
+    #videoEl.visible { opacity: 1; }
+    #poseCanvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none; }
+    .camera-bite-flash { position: absolute; inset: 0; border: 4px solid var(--accent); border-radius: var(--radius-sm); opacity: 0; pointer-events: none; transition: opacity 0.08s; box-shadow: inset 0 0 20px rgba(212,119,10,0.3); }
+    .camera-bite-flash.flash { opacity: 1; }
+    .cam-chip { position: absolute; font-family: var(--font-mono); font-size: 0.62rem; padding: 3px 8px; border-radius: 4px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+    .cam-chip-tl { top: 8px; left: 8px; background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.8); }
+    .cam-chip-tr { top: 8px; right: 8px; background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.8); }
+    .cam-chip-bl { bottom: 8px; left: 8px; background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.65); }
+    .phase-pill { position: absolute; bottom: 8px; right: 8px; font-family: var(--font-mono); font-size: 0.62rem; font-weight: 500; padding: 3px 10px; border-radius: 99px; transition: background 0.2s, color 0.2s; }
+    .phase-idle     { background: rgba(50,50,50,0.7);    color: rgba(255,255,255,0.5); }
+    .phase-active   { background: rgba(212,119,10,0.85); color: #fff; }
+    .phase-settling { background: rgba(46,125,79,0.85);  color: #fff; }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-secondary); }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .legend-ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
+    .signal-wrap { margin-top: 12px; }
+    .signal-header { display: flex; justify-content: space-between; align-items: center; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 5px; }
+    .signal-header strong { color: var(--text-primary); }
+    #wristCanvas { display: block; width: 100%; height: 70px; background: var(--surface-2); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+    .signal-legend { display: flex; gap: 14px; margin-top: 6px; flex-wrap: wrap; }
+    .signal-legend-item { display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.65rem; color: var(--text-secondary); }
+    .signal-legend-line { width: 16px; height: 2px; border-radius: 1px; }
+    .signal-legend-dash { width: 16px; height: 0; border-top: 2px dashed; }
+    .sensor-status { margin-top: 12px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary); }
+
+    /* ── Stats ── */
+    .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
+    .stat-cell { background: var(--surface-2); border-radius: var(--radius-sm); padding: 14px 12px; border: 1px solid var(--border); }
+    .stat-value { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 500; color: var(--text-primary); letter-spacing: -0.03em; line-height: 1; margin-bottom: 4px; }
+    .stat-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); font-weight: 600; }
+    .bite-indicator { display: none; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.78rem; font-weight: 500; color: var(--accent-dark); background: var(--accent-light); border-radius: var(--radius-sm); padding: 8px 12px; border: 1px solid #f5c47e; animation: flashIn 0.15s ease; }
+    .bite-indicator.visible { display: flex; }
+    .bite-flash-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 0.8s infinite; }
+    @keyframes pulse { 0%,100%{transform:scale(1);opacity:1;} 50%{transform:scale(1.5);opacity:0.6;} }
+    @keyframes flashIn { from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);} }
+
+    /* ── Timeline ── */
+    .timeline-track { position: relative; height: 40px; margin-bottom: 6px; }
+    .timeline-rail { position: absolute; top: 50%; left: 0; right: 0; height: 3px; background: var(--surface-2); border-radius: 2px; transform: translateY(-50%); border: 1px solid var(--border); }
+    .timeline-tick { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 4px; height: 20px; background: var(--accent); border-radius: 2px; opacity: 0.85; animation: tickIn 0.2s ease; }
+    @keyframes tickIn { from{transform:translate(-50%,-50%) scaleY(0);}to{transform:translate(-50%,-50%) scaleY(1);} }
+    .timeline-labels { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-secondary); }
+
+    /* ── Summary / Charts ── */
+    .summary-hero { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 20px; }
+    .summary-hero-item { background: var(--accent-light); border: 1px solid #f5c47e; border-radius: var(--radius-sm); padding: 12px 6px; text-align: center; }
+    .summary-hero-value { font-family: var(--font-mono); font-size: 1.15rem; font-weight: 500; color: var(--accent-dark); letter-spacing: -0.03em; line-height: 1; margin-bottom: 4px; }
+    .summary-hero-label { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-dark); opacity: 0.75; font-weight: 600; }
+    .chart-block { margin-bottom: 24px; }
+    .chart-block:last-child { margin-bottom: 0; }
+    .chart-title { font-family: var(--font-display); font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-primary); margin-bottom: 2px; }
+    .chart-subtitle { font-size: 0.74rem; color: var(--text-secondary); margin-bottom: 10px; }
+    .chart-wrap { position: relative; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; height: 180px; }
+    .chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+    /* ── Survey ── */
+    .field { margin-bottom: 16px; }
+    .field label { display: block; font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 6px; }
+    .field input, .field select, .field textarea { width: 100%; font-family: var(--font-display); font-size: 0.9rem; color: var(--text-primary); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 13px; outline: none; transition: border-color var(--transition), box-shadow var(--transition); -webkit-appearance: none; appearance: none; }
+    .field select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b6460' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; }
+    .field input:focus,.field select:focus,.field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212,119,10,0.12); background: #fff; }
+    .field textarea { resize: vertical; }
+    .submit-status { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.8rem; text-align: center; }
+    .submit-status.success { background: #e8f4ec; color: var(--success); border: 1px solid #a7d5b4; }
+    .submit-status.error { background: var(--danger-light); color: var(--danger); border: 1px solid #f5b4af; }
+
+    /* ═══════════════════════════════════════════════════
+       PLATE BUDDY styles
+    ═══════════════════════════════════════════════════ */
+    .buddy-reveal-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: 24px 20px;
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .buddy-reveal-label {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .buddy-state-name {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+      transition: color 0.5s ease;
+    }
+
+    .buddy-state-desc {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 18px;
+      max-width: 280px;
+    }
+
+    .buddy-canvas-wrap {
+      width: 180px;
+      height: 180px;
+      margin-bottom: 16px;
+    }
+
+    .buddy-pace-bar-wrap { width: 100%; margin-bottom: 16px; }
+    .buddy-pace-track { width: 100%; height: 6px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 99px; position: relative; }
+    .buddy-pace-fill { height: 100%; border-radius: 99px; transition: width 1s ease, background 1s ease; }
+    .buddy-pace-labels { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.62rem; color: var(--text-secondary); margin-top: 5px; }
+
+    .buddy-metric-row {
+      display: grid;
+      grid-template-columns: repeat(3,1fr);
+      gap: 8px;
+      width: 100%;
+    }
+    .buddy-metric {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 6px;
+      text-align: center;
+    }
+    .buddy-metric-val { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 500; color: var(--text-primary); }
+    .buddy-metric-lbl { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-top: 2px; }
+
+    @supports (padding-bottom: env(safe-area-inset-bottom)) {
+      body { padding-bottom: calc(40px + env(safe-area-inset-bottom)); }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      BiteTrack
+    </div>
+    <div id="statusBadge" class="status-badge status-idle">Idle</div>
+  </header>
+
+  <main class="main-content">
+
+    <!-- CAMERA SETUP -->
+    <section class="card">
+      <h2 class="card-title">Camera Setup</h2>
+      <p class="card-subtitle">Position your device so the camera can see your hand and upper body while eating. The tracker detects wrist movement to count bites.</p>
+      <div class="camera-wrap" id="cameraWrap">
+        <div class="camera-placeholder" id="cameraPlaceholder">
+          <span class="cam-icon">📷</span>
+          <span>Camera not yet active</span>
+        </div>
+        <video id="videoEl" autoplay playsinline muted></video>
+        <canvas id="poseCanvas"></canvas>
+        <div class="camera-bite-flash" id="biteFlash"></div>
+        <div class="cam-chip cam-chip-tl" id="chipWrist">Wrist: —</div>
+        <div class="cam-chip cam-chip-tr" id="chipVelocity">↑ 0.000</div>
+        <div class="cam-chip cam-chip-bl" id="chipFps">model loading…</div>
+        <div class="phase-pill phase-idle" id="phasePill">idle</div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:rgba(212,119,10,0.7)"></div>Body keypoints</div>
+        <div class="legend-item"><div class="legend-ring" style="border-color:rgba(255,255,255,0.8)"></div>Wrist (inactive)</div>
+        <div class="legend-item"><div class="legend-ring" style="border-color:rgba(212,119,10,1)"></div>Wrist rising → bite</div>
+      </div>
+      <div class="signal-wrap">
+        <div class="signal-header">
+          <span>Wrist signal <strong id="signalPhaseLabel">(waiting)</strong></span>
+          <span id="velocityLabel">vel: 0.0000</span>
+        </div>
+        <canvas id="wristCanvas"></canvas>
+        <div class="signal-legend">
+          <div class="signal-legend-item"><div class="signal-legend-line" style="background:rgba(212,119,10,0.8)"></div>Wrist height</div>
+          <div class="signal-legend-item"><div class="signal-legend-line" style="background:rgba(46,125,79,0.8)"></div>Upward velocity</div>
+          <div class="signal-legend-item"><div class="signal-legend-dash" style="border-color:rgba(192,57,43,0.6)"></div>Velocity threshold</div>
+          <div class="signal-legend-item"><div class="signal-legend-dash" style="border-color:rgba(55,48,163,0.6)"></div>Height threshold</div>
+        </div>
+      </div>
+      <button class="btn btn-primary" id="btnCamera" style="margin-top:14px;width:100%">Enable Camera</button>
+      <div class="sensor-status" style="margin-top:8px">Status: <span id="cameraStatusText" style="color:var(--text-secondary)">Not started</span></div>
+    </section>
+
+    <!-- MEAL CONTROLS -->
+    <section class="card">
+      <h2 class="card-title">Meal Controls</h2>
+      <div class="controls-row">
+        <button class="btn btn-success" id="btnStart" disabled>Start Meal</button>
+        <button class="btn btn-danger"  id="btnEnd"   disabled>End Meal</button>
+        <button class="btn btn-ghost"   id="btnReset">Reset</button>
+      </div>
+    </section>
+
+    <!-- LIVE STATS -->
+    <section class="card">
+      <h2 class="card-title">Live Stats</h2>
+      <div class="stats-grid">
+        <div class="stat-cell"><div class="stat-value" id="statMealTime">0:00</div><div class="stat-label">Meal Time</div></div>
+        <div class="stat-cell"><div class="stat-value" id="statBites">0</div><div class="stat-label">Bites</div></div>
+        <div class="stat-cell"><div class="stat-value" id="statAvgDuration">0.0s</div><div class="stat-label">Avg Duration</div></div>
+        <div class="stat-cell"><div class="stat-value" id="statPace">0.0</div><div class="stat-label">Bites / min</div></div>
+      </div>
+      <div class="bite-indicator" id="biteIndicator">
+        <span class="bite-flash-dot"></span>
+        Bite detected!
+      </div>
+    </section>
+
+    <!-- TIMELINE -->
+    <section class="card">
+      <h2 class="card-title">Bite Timeline</h2>
+      <div class="timeline-track" id="timelineTrack">
+        <div class="timeline-rail"></div>
+      </div>
+      <div class="timeline-labels">
+        <span>0:00</span>
+        <span id="timelineEnd">—</span>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════
+         PLATE BUDDY REVEAL (post-meal)
+    ══════════════════════════════════════ -->
+    <section class="buddy-reveal-card" id="buddyCard" hidden>
+      <div class="buddy-reveal-label">Plate Buddy is feeling…</div>
+      <div class="buddy-state-name" id="buddyStateName">CHILLING</div>
+      <div class="buddy-state-desc" id="buddyStateDesc">Mindful, steady rhythm · Good interval between bites</div>
+      <div class="buddy-canvas-wrap">
+        <canvas id="buddyCanvas" width="180" height="180"></canvas>
+      </div>
+      <div class="buddy-pace-bar-wrap">
+        <div class="buddy-pace-track">
+          <div class="buddy-pace-fill" id="buddyPaceFill" style="width:0%;background:#5DCAA5;"></div>
+        </div>
+        <div class="buddy-pace-labels"><span>very slow</span><span>perfect</span><span>too fast</span></div>
+      </div>
+      <div class="buddy-metric-row">
+        <div class="buddy-metric"><div class="buddy-metric-val" id="bMetricBpm">—</div><div class="buddy-metric-lbl">bites / min</div></div>
+        <div class="buddy-metric"><div class="buddy-metric-val" id="bMetricInterval">—</div><div class="buddy-metric-lbl">avg interval</div></div>
+        <div class="buddy-metric"><div class="buddy-metric-val" id="bMetricDuration">—</div><div class="buddy-metric-lbl">meal time</div></div>
+      </div>
+    </section>
+
+    <!-- POST-MEAL SUMMARY + CHARTS -->
+    <section class="card" id="summaryCard" hidden>
+      <h2 class="card-title">Meal Summary</h2>
+      <div class="summary-hero">
+        <div class="summary-hero-item"><div class="summary-hero-value" id="sumMealTime">—</div><div class="summary-hero-label">Duration</div></div>
+        <div class="summary-hero-item"><div class="summary-hero-value" id="sumBites">—</div><div class="summary-hero-label">Bites</div></div>
+        <div class="summary-hero-item"><div class="summary-hero-value" id="sumAvg">—</div><div class="summary-hero-label">Avg Bite</div></div>
+        <div class="summary-hero-item"><div class="summary-hero-value" id="sumPace">—</div><div class="summary-hero-label">Bites/min</div></div>
+      </div>
+      <div class="chart-block">
+        <div class="chart-title">Bite Durations</div>
+        <div class="chart-subtitle">Duration of each individual bite (seconds)</div>
+        <div class="chart-wrap"><canvas id="chartBiteDurations"></canvas></div>
+      </div>
+      <div class="chart-block">
+        <div class="chart-title">Eating Pace Over Time</div>
+        <div class="chart-subtitle">Rolling bites per minute across the meal</div>
+        <div class="chart-wrap"><canvas id="chartPace"></canvas></div>
+      </div>
+      <div class="chart-block">
+        <div class="chart-title">Time Between Bites</div>
+        <div class="chart-subtitle">Pause duration before each bite (seconds)</div>
+        <div class="chart-wrap"><canvas id="chartGaps"></canvas></div>
+      </div>
+    </section>
+
+    <!-- SURVEY -->
+    <section class="card" id="surveyCard" hidden>
+      <h2 class="card-title">Post-Meal Reflection</h2>
+      <p class="card-subtitle">Help us understand your eating context.</p>
+      <form id="surveyForm" novalidate>
+        <div class="field"><label for="fieldFood">What did you eat?</label><input type="text" id="fieldFood" placeholder="e.g. pasta, sandwich, rice…" /></div>
+        <div class="field"><label for="fieldContext">Eating Context</label><select id="fieldContext"><option value="">Select…</option><option value="alone">Eating alone</option><option value="with_others">Eating with others</option><option value="public">Eating in public place</option></select></div>
+        <div class="field"><label for="fieldStress">Stress Level Today</label><select id="fieldStress"><option value="">Select…</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        <div class="field"><label for="fieldDistraction">Were You Distracted?</label><select id="fieldDistraction"><option value="">Select…</option><option value="no">No</option><option value="yes">Yes</option></select></div>
+        <div class="field"><label for="fieldNotes">Notes About the Day</label><textarea id="fieldNotes" rows="3" placeholder="Anything worth noting?"></textarea></div>
+        <button type="submit" class="btn btn-primary btn-full" id="btnSubmit">Submit</button>
+        <div id="submitStatus" class="submit-status" hidden></div>
+      </form>
+    </section>
+
+  </main>
+
+  <script>
+  'use strict';
+
+  /* ─────────────────────────────────────────
+     CONFIG
+  ───────────────────────────────────────── */
+  const CONFIG = {
+    VELOCITY_THRESHOLD:    0.002,
+    WRIST_HEIGHT_THRESHOLD: 0.7,
+    COOLDOWN_MS:           1200,
+    GRAPH_HISTORY:         300,
+    STATS_REFRESH_MS:      500,
+    DATAFOUNDRY_URL:   'https://data.id.tue.nl/api/v1/datasets/entity/19856',
+    DATAFOUNDRY_TOKEN: 'OCtQVi9wOTdpQ005L3E1MlIvdDZSRGl5emlMdnhEL2RNbGxNRlZIZjVqND0=',
+  };
+
+  /* ─────────────────────────────────────────
+     STATE
+  ───────────────────────────────────────── */
+  const state = {
+    detector: null, stream: null, animFrame: null, cameraReady: false,
+    lastWristY: null, wristHistory: [],
+    bitePhase: 'idle', biteStartTime: null, activeFrames: 0,
+    settleStart: null, lastBiteEndTime: 0,
+    mealActive: false, mealStartTime: null, mealEndTime: null,
+    bites: [], statsTimer: null,
+    charts: { durations: null, pace: null, gaps: null },
+    _lastFrameTime: null,
+    // Buddy animation
+    buddy: { wobble: 0, bob: 0, targetBob: 0, blinkTimer: 0, blinkOpen: 1, animId: null, stateKey: 'chilling', color: '#5DCAA5' },
+  };
+
+  /* ─────────────────────────────────────────
+     DOM REFS
+  ───────────────────────────────────────── */
+  const ui = {
+    btnCamera: document.getElementById('btnCamera'),
+    btnStart:  document.getElementById('btnStart'),
+    btnEnd:    document.getElementById('btnEnd'),
+    btnReset:  document.getElementById('btnReset'),
+    cameraStatusText: document.getElementById('cameraStatusText'),
+    statusBadge: document.getElementById('statusBadge'),
+    videoEl:     document.getElementById('videoEl'),
+    poseCanvas:  document.getElementById('poseCanvas'),
+    biteFlash:   document.getElementById('biteFlash'),
+    cameraPlaceholder: document.getElementById('cameraPlaceholder'),
+    chipWrist:   document.getElementById('chipWrist'),
+    chipVelocity:document.getElementById('chipVelocity'),
+    chipFps:     document.getElementById('chipFps'),
+    phasePill:   document.getElementById('phasePill'),
+    signalPhaseLabel: document.getElementById('signalPhaseLabel'),
+    wristCanvas: document.getElementById('wristCanvas'),
+    velocityLabel: document.getElementById('velocityLabel'),
+    biteIndicator: document.getElementById('biteIndicator'),
+    statMealTime:  document.getElementById('statMealTime'),
+    statBites:     document.getElementById('statBites'),
+    statAvgDuration: document.getElementById('statAvgDuration'),
+    statPace:      document.getElementById('statPace'),
+    timelineTrack: document.getElementById('timelineTrack'),
+    timelineEnd:   document.getElementById('timelineEnd'),
+    buddyCard:     document.getElementById('buddyCard'),
+    buddyStateName: document.getElementById('buddyStateName'),
+    buddyStateDesc: document.getElementById('buddyStateDesc'),
+    buddyCanvas:   document.getElementById('buddyCanvas'),
+    buddyPaceFill: document.getElementById('buddyPaceFill'),
+    bMetricBpm:    document.getElementById('bMetricBpm'),
+    bMetricInterval: document.getElementById('bMetricInterval'),
+    bMetricDuration: document.getElementById('bMetricDuration'),
+    summaryCard:   document.getElementById('summaryCard'),
+    sumMealTime:   document.getElementById('sumMealTime'),
+    sumBites:      document.getElementById('sumBites'),
+    sumAvg:        document.getElementById('sumAvg'),
+    sumPace:       document.getElementById('sumPace'),
+    surveyCard:    document.getElementById('surveyCard'),
+    surveyForm:    document.getElementById('surveyForm'),
+    btnSubmit:     document.getElementById('btnSubmit'),
+    submitStatus:  document.getElementById('submitStatus'),
+    fieldFood:     document.getElementById('fieldFood'),
+    fieldContext:  document.getElementById('fieldContext'),
+    fieldStress:   document.getElementById('fieldStress'),
+    fieldDistraction: document.getElementById('fieldDistraction'),
+    fieldNotes:    document.getElementById('fieldNotes'),
+  };
+
+  const wristCtx = ui.wristCanvas.getContext('2d');
+
+  /* ─────────────────────────────────────────
+     PLATE BUDDY — states & drawing
+  ───────────────────────────────────────── */
+  const BUDDY_STATES = {
+    drifted:  { name:'DRIFTED OFF', desc:'Meal abandoned or very long · Very slow pace',        color:'#B4B2A9', eyeStyle:'sleepy',  mood:0 },
+    chilling: { name:'CHILLING',    desc:'Mindful, steady rhythm · Good interval between bites', color:'#5DCAA5', eyeStyle:'happy',   mood:1 },
+    lounging: { name:'LOUNGING',    desc:'A bit fast, still ok · Slightly rushed rhythm',        color:'#EF9F27', eyeStyle:'neutral', mood:2 },
+    foodcoma: { name:'FOOD COMA',   desc:'Ate too fast · Very short pauses between bites',       color:'#E24B4A', eyeStyle:'dizzy',   mood:3 },
+  };
+
+  function getBuddyState(bpm) {
+    if (bpm < 1.2)  return 'drifted';
+    if (bpm <= 3.5) return 'chilling';
+    if (bpm <= 6)   return 'lounging';
+    return 'foodcoma';
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function drawBuddy(canvas, sk, color, bob, wobble, blinkOpen) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2 + 8 + bob;
+
+    // shadow
+    ctx.save();
+    ctx.globalAlpha = 0.1;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 48, 40, 9, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#333'; ctx.fill();
+    ctx.restore();
+
+    // squish
+    let sx = 1, sy = 1;
+    if (sk === 'foodcoma') { sx = 1.14; sy = 0.88; }
+    if (sk === 'drifted')  { sx = 0.95; sy = 1.06; }
+    if (sk === 'chilling') { sx = 1 + Math.sin(wobble * 0.04) * 0.03; sy = 1 - Math.sin(wobble * 0.04) * 0.03; }
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(sx, sy);
+
+    // body
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 44, 42, 0, 0, Math.PI * 2);
+    ctx.fillStyle = color; ctx.fill();
+
+    // highlight
+    ctx.beginPath();
+    ctx.ellipse(-14, -15, 15, 10, -0.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fill();
+
+    // blush
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#f87c7c';
+    ctx.beginPath(); ctx.ellipse(-26, 11, 10, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(26, 11, 10, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // eyes
+    const eyeStyle = BUDDY_STATES[sk].eyeStyle;
+    if (eyeStyle === 'dizzy') {
+      ctx.strokeStyle = '#5C3317'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+      for (const side of [-15, 15]) {
+        ctx.beginPath(); ctx.moveTo(side-5,-8); ctx.lineTo(side+5, 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(side+5,-8); ctx.lineTo(side-5, 2); ctx.stroke();
+      }
+    } else if (eyeStyle === 'sleepy') {
+      for (const side of [-15, 15]) {
+        ctx.beginPath(); ctx.ellipse(side, -4, 7, 4 * blinkOpen, 0, 0, Math.PI*2); ctx.fillStyle = '#5C3317'; ctx.fill();
+        ctx.beginPath(); ctx.ellipse(side, -7, 8, 4, 0, Math.PI, Math.PI*2); ctx.fillStyle = color; ctx.fill();
+      }
+    } else if (eyeStyle === 'neutral') {
+      for (const side of [-15, 15]) {
+        ctx.beginPath(); ctx.ellipse(side, -5, 6, 5*blinkOpen, 0, 0, Math.PI*2); ctx.fillStyle = '#5C3317'; ctx.fill();
+        ctx.beginPath(); ctx.arc(side+2, -6, 2, 0, Math.PI*2); ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill();
+      }
+    } else {
+      // happy
+      for (const side of [-15, 15]) {
+        ctx.beginPath(); ctx.ellipse(side, -5, 7, 7*blinkOpen, 0, 0, Math.PI*2); ctx.fillStyle = '#5C3317'; ctx.fill();
+        ctx.beginPath(); ctx.arc(side+2.5, -7, 2.5, 0, Math.PI*2); ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fill();
+      }
+    }
+
+    // mouth
+    ctx.strokeStyle = '#5C3317'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    if (sk === 'chilling') {
+      ctx.beginPath(); ctx.arc(0, 16, 14, 0.15, Math.PI-0.15); ctx.stroke();
+    } else if (sk === 'lounging') {
+      ctx.beginPath(); ctx.moveTo(-10, 18); ctx.lineTo(10, 18); ctx.stroke();
+    } else if (sk === 'foodcoma') {
+      ctx.beginPath(); ctx.arc(0, 22, 14, Math.PI+0.2, -0.2); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.ellipse(0, 20, 8, 5, 0, 0, Math.PI*2); ctx.stroke();
+    }
+    ctx.restore();
+
+    // arms
+    ctx.strokeStyle = color; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    if (sk === 'chilling') {
+      const a = Math.sin(wobble * 0.05) * 0.15;
+      ctx.save(); ctx.translate(cx-38, cy-5); ctx.rotate(-0.9+a); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-20,-18); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.translate(cx+38, cy-5); ctx.rotate(0.9-a);  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(20,-18);  ctx.stroke(); ctx.restore();
+    } else if (sk === 'lounging') {
+      ctx.save(); ctx.translate(cx-38, cy+5); ctx.rotate(-0.3); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-16,10); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.translate(cx+38, cy-8); ctx.rotate(1.1);  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(12,-8);  ctx.stroke(); ctx.restore();
+    } else if (sk === 'foodcoma') {
+      ctx.save(); ctx.translate(cx-40, cy+8); ctx.rotate(0.2+Math.sin(wobble*0.1)*0.05); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-22,5); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.translate(cx+40, cy+8); ctx.rotate(-0.2); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(22,5); ctx.stroke(); ctx.restore();
+    } else {
+      ctx.save(); ctx.translate(cx-38, cy+5); ctx.rotate(0.4);  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-10,18); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.translate(cx+38, cy+5); ctx.rotate(-0.4); ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(10,18);  ctx.stroke(); ctx.restore();
+    }
+  }
+
+  function buddyAnimLoop() {
+    const b = state.buddy;
+    b.wobble++;
+    b.blinkTimer++;
+    if (b.blinkTimer > 130) { b.blinkOpen = 0.08; if (b.blinkTimer > 136) { b.blinkOpen = 1; b.blinkTimer = 0; } }
+
+    const sk = b.stateKey;
+    if (sk === 'chilling') b.targetBob = Math.sin(b.wobble * 0.05) * 4;
+    else if (sk === 'foodcoma') b.targetBob = Math.sin(b.wobble * 0.15) * 2;
+    else if (sk === 'drifted')  b.targetBob = 4;
+    else b.targetBob = Math.sin(b.wobble * 0.07) * 2;
+
+    b.bob = lerp(b.bob, b.targetBob, 0.1);
+    drawBuddy(ui.buddyCanvas, sk, b.color, b.bob, b.wobble, b.blinkOpen);
+    b.animId = requestAnimationFrame(buddyAnimLoop);
+  }
+
+  function showBuddy(bpm, mealMs, biteCount) {
+    const sk = getBuddyState(bpm);
+    const bstate = BUDDY_STATES[sk];
+    state.buddy.stateKey = sk;
+    state.buddy.color    = bstate.color;
+
+    ui.buddyStateName.textContent = bstate.name;
+    ui.buddyStateName.style.color = bstate.color;
+    ui.buddyStateDesc.textContent = bstate.desc;
+
+    const pct = Math.min(100, Math.round((bpm / 10) * 100));
+    ui.buddyPaceFill.style.width      = pct + '%';
+    ui.buddyPaceFill.style.background = bstate.color;
+
+    const interval = bpm > 0 ? Math.round(60 / bpm) : 0;
+    ui.bMetricBpm.textContent      = bpm.toFixed(1);
+    ui.bMetricInterval.textContent  = interval + 's';
+    ui.bMetricDuration.textContent  = formatDuration(mealMs);
+
+    ui.buddyCard.hidden = false;
+
+    // Start animation loop
+    if (state.buddy.animId) cancelAnimationFrame(state.buddy.animId);
+    buddyAnimLoop();
+
+    setTimeout(() => ui.buddyCard.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+  }
+
+  /* ─────────────────────────────────────────
+     CAMERA + MODEL
+  ───────────────────────────────────────── */
+  async function enableCamera() {
+    ui.btnCamera.disabled = true;
+    setCameraStatus('Loading model…', 'neutral');
+    try {
+      state.detector = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+      );
+    } catch (err) {
+      setCameraStatus('Failed to load model: ' + err.message, false);
+      ui.btnCamera.disabled = false;
+      return;
+    }
+    setCameraStatus('Requesting camera…', 'neutral');
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+      ui.videoEl.srcObject = state.stream;
+      await new Promise(resolve => { ui.videoEl.onloadedmetadata = resolve; });
+      ui.videoEl.play();
+      ui.poseCanvas.width  = ui.videoEl.videoWidth;
+      ui.poseCanvas.height = ui.videoEl.videoHeight;
+      ui.videoEl.classList.add('visible');
+      ui.cameraPlaceholder.classList.add('hidden');
+      ui.chipFps.textContent = 'model ready';
+      state.cameraReady = true;
+      ui.btnStart.disabled = false;
+      setCameraStatus('Camera active ✓', true);
+      setStatusBadge('ready');
+      requestAnimationFrame(poseLoop);
+    } catch (err) {
+      setCameraStatus('Camera error: ' + err.message, false);
+      ui.btnCamera.disabled = false;
+    }
+  }
+
+  /* ─────────────────────────────────────────
+     POSE LOOP
+  ───────────────────────────────────────── */
+  async function poseLoop() {
+    state.animFrame = requestAnimationFrame(poseLoop);
+    if (!state.cameraReady || ui.videoEl.readyState < 2) return;
+
+    let poses;
+    try { poses = await state.detector.estimatePoses(ui.videoEl); }
+    catch (e) { return; }
+
+    const ctx = ui.poseCanvas.getContext('2d');
+    ctx.clearRect(0, 0, ui.poseCanvas.width, ui.poseCanvas.height);
+
+    const now2 = performance.now();
+    if (state._lastFrameTime) {
+      const fps = Math.round(1000 / (now2 - state._lastFrameTime));
+      ui.chipFps.textContent = `${fps} fps`;
+    }
+    state._lastFrameTime = now2;
+
+    if (!poses || poses.length === 0) {
+      ui.chipWrist.textContent    = 'Wrist: not visible';
+      ui.chipVelocity.textContent = '↑ 0.000';
+      updateWristGraph(null, 0);
+      return;
+    }
+
+    const keypoints  = poses[0].keypoints;
+    const leftWrist  = keypoints[9];
+    const rightWrist = keypoints[10];
+    let wrist = null;
+    if (leftWrist.score > 0.3 && rightWrist.score > 0.3) {
+      wrist = leftWrist.y < rightWrist.y ? leftWrist : rightWrist;
+    } else if (rightWrist.score > 0.3) { wrist = rightWrist; }
+    else if (leftWrist.score > 0.3)    { wrist = leftWrist; }
+
+    drawKeypoints(ctx, keypoints);
+
+    if (!wrist) {
+      ui.chipWrist.textContent = 'Wrist: not visible';
+      ui.chipVelocity.textContent = '↑ 0.000';
+      state.lastWristY = null;
+      updateWristGraph(null, 0);
+      return;
+    }
+
+    const normY = wrist.y / ui.poseCanvas.height;
+    drawWristHighlight(ctx, wrist);
+
+    let velocity = 0;
+    if (state.lastWristY !== null) { velocity = state.lastWristY - normY; }
+    state.lastWristY = normY;
+    if (!state.peakVelocity) state.peakVelocity = 0;
+    if (velocity > state.peakVelocity) state.peakVelocity = velocity;
+
+    ui.chipWrist.textContent     = `Wrist: ${(normY * 100).toFixed(0)}%`;
+    ui.chipVelocity.textContent  = `↑ ${velocity.toFixed(4)} | peak: ${state.peakVelocity.toFixed(4)}`;
+    ui.velocityLabel.textContent = `vel: ${velocity.toFixed(4)} | peak: ${state.peakVelocity.toFixed(4)}`;
+
+    updateWristGraph(normY, velocity);
+    if (state.mealActive) { detectBite(velocity, normY); }
+  }
+
+  /* ─────────────────────────────────────────
+     BITE DETECTION
+  ───────────────────────────────────────── */
+  function detectBite(velocity, normY) {
+    const now        = Date.now();
+    const inCooldown = (now - state.lastBiteEndTime) < CONFIG.COOLDOWN_MS;
+    const bothAbove  = velocity >= CONFIG.VELOCITY_THRESHOLD && normY <= CONFIG.WRIST_HEIGHT_THRESHOLD;
+
+    if (inCooldown) { setPhasePill('settling'); return; }
+
+    if (state.bitePhase === 'idle') {
+      if (bothAbove) { state.bitePhase = 'active'; state.biteStartTime = now; setPhasePill('active'); }
+    } else if (state.bitePhase === 'active') {
+      if (!bothAbove) {
+        recordBite(state.biteStartTime, now, now - state.biteStartTime);
+        state.lastBiteEndTime = now;
+        state.biteStartTime   = null;
+        state.bitePhase       = 'idle';
+        setPhasePill('idle');
+      }
+    }
+  }
+
+  function recordBite(start, end, duration) {
+    state.bites.push({ start, end, duration });
+    flashBiteIndicator();
+    flashCameraOverlay();
+    addTimelineTick(start);
+  }
+
+  /* ─────────────────────────────────────────
+     DRAWING HELPERS
+  ───────────────────────────────────────── */
+  function drawKeypoints(ctx, keypoints) {
+    keypoints.forEach(kp => {
+      if (kp.score < 0.3) return;
+      ctx.beginPath();
+      ctx.arc(kp.x, kp.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(212,119,10,0.7)';
+      ctx.fill();
+    });
+  }
+
+  function drawWristHighlight(ctx, wrist) {
+    ctx.beginPath();
+    ctx.arc(wrist.x, wrist.y, 12, 0, Math.PI * 2);
+    ctx.strokeStyle = state.bitePhase === 'active' ? 'rgba(212,119,10,1)' : 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+
+  /* ─────────────────────────────────────────
+     WRIST GRAPH
+  ───────────────────────────────────────── */
+  function updateWristGraph(normY, velocity) {
+    state.wristHistory.push({ y: normY, v: velocity, t: Date.now() });
+    if (state.wristHistory.length > CONFIG.GRAPH_HISTORY) state.wristHistory.shift();
+
+    const w = ui.wristCanvas.width  = ui.wristCanvas.offsetWidth;
+    const h = ui.wristCanvas.height = 60;
+    wristCtx.clearRect(0, 0, w, h);
+
+    const hist = state.wristHistory.filter(p => p.y !== null);
+    if (hist.length < 2) return;
+
+    wristCtx.beginPath(); wristCtx.strokeStyle = 'rgba(212,119,10,0.8)'; wristCtx.lineWidth = 1.5;
+    hist.forEach((p, i) => { const x=(i/CONFIG.GRAPH_HISTORY)*w; i===0?wristCtx.moveTo(x,p.y*h):wristCtx.lineTo(x,p.y*h); });
+    wristCtx.stroke();
+
+    wristCtx.beginPath(); wristCtx.strokeStyle = 'rgba(46,125,79,0.7)'; wristCtx.lineWidth = 1;
+    hist.forEach((p, i) => { const x=(i/CONFIG.GRAPH_HISTORY)*w; const py=h/2-(p.v*h*8); i===0?wristCtx.moveTo(x,py):wristCtx.lineTo(x,py); });
+    wristCtx.stroke();
+
+    const velThreshY = h/2 - CONFIG.VELOCITY_THRESHOLD*h*8;
+    wristCtx.beginPath(); wristCtx.setLineDash([4,3]); wristCtx.strokeStyle='rgba(192,57,43,0.6)'; wristCtx.lineWidth=1.5;
+    wristCtx.moveTo(0,velThreshY); wristCtx.lineTo(w,velThreshY); wristCtx.stroke();
+
+    const heightThreshY = CONFIG.WRIST_HEIGHT_THRESHOLD * h;
+    wristCtx.beginPath(); wristCtx.setLineDash([4,3]); wristCtx.strokeStyle='rgba(55,48,163,0.6)'; wristCtx.lineWidth=1.5;
+    wristCtx.moveTo(0,heightThreshY); wristCtx.lineTo(w,heightThreshY); wristCtx.stroke();
+    wristCtx.setLineDash([]);
+  }
+
+  /* ─────────────────────────────────────────
+     MEAL CONTROLS
+  ───────────────────────────────────────── */
+  function startMeal() {
+    Object.assign(state, {
+      mealActive: true, mealStartTime: Date.now(), mealEndTime: null,
+      bites: [], bitePhase: 'idle', biteStartTime: null,
+      lastBiteEndTime: 0, lastWristY: null, peakVelocity: 0,
+    });
+    ui.timelineTrack.querySelectorAll('.timeline-tick').forEach(t => t.remove());
+    ui.timelineEnd.textContent = '—';
+    ui.btnStart.disabled = true;
+    ui.btnEnd.disabled   = false;
+    ui.btnReset.disabled = true;
+    setStatusBadge('eating');
+    state.statsTimer = setInterval(refreshStats, CONFIG.STATS_REFRESH_MS);
+  }
+
+  function endMeal() {
+    state.mealActive  = false;
+    state.mealEndTime = Date.now();
+    clearInterval(state.statsTimer);
+    refreshStats();
+    ui.btnEnd.disabled   = true;
+    ui.btnStart.disabled = true;
+    ui.btnReset.disabled = false;
+    setStatusBadge('done');
+    ui.timelineEnd.textContent = formatDuration(state.mealEndTime - state.mealStartTime);
+    rescaleTimeline();
+
+    // Calculate pace for Buddy
+    const mealMs = state.mealEndTime - state.mealStartTime;
+    const bpm    = state.bites.length > 0 && mealMs > 0
+      ? state.bites.length / (mealMs / 60000) : 0;
+
+    // Show Buddy first, then charts below
+    showBuddy(bpm, mealMs, state.bites.length);
+    renderSummary();
+    ui.summaryCard.hidden = false;
+    ui.surveyCard.hidden  = false;
+  }
+
+  function resetAll() {
+    clearInterval(state.statsTimer);
+    if (state.animFrame) cancelAnimationFrame(state.animFrame);
+    if (state.buddy.animId) cancelAnimationFrame(state.buddy.animId);
+    if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+
+    Object.assign(state, {
+      mealActive:false, mealStartTime:null, mealEndTime:null,
+      bites:[], bitePhase:'idle', biteStartTime:null,
+      lastBiteEndTime:0, lastWristY:null, wristHistory:[], cameraReady:false,
+      stream:null, animFrame:null,
+    });
+    state.buddy.animId = null;
+
+    ['durations','pace','gaps'].forEach(k => {
+      if (state.charts[k]) { state.charts[k].destroy(); state.charts[k]=null; }
+    });
+
+    ui.statMealTime.textContent    = '0:00';
+    ui.statBites.textContent       = '0';
+    ui.statAvgDuration.textContent = '0.0s';
+    ui.statPace.textContent        = '0.0';
+    ui.biteIndicator.classList.remove('visible');
+    ui.timelineTrack.querySelectorAll('.timeline-tick').forEach(t => t.remove());
+    ui.timelineEnd.textContent = '—';
+    ui.buddyCard.hidden    = true;
+    ui.summaryCard.hidden  = true;
+    ui.surveyCard.hidden   = true;
+    ui.surveyForm.reset();
+    ui.submitStatus.hidden = true;
+    ui.btnSubmit.disabled  = false;
+    ui.btnSubmit.textContent = 'Submit';
+    ui.btnCamera.disabled  = false;
+    ui.btnStart.disabled   = true;
+    ui.btnEnd.disabled     = true;
+    setCameraStatus('Not started', 'neutral');
+    setStatusBadge('idle');
+    setPhasePill('idle');
+    ui.signalPhaseLabel.textContent = '(waiting)';
+    ui.chipFps.textContent  = 'model loading…';
+    ui.chipWrist.textContent = 'Wrist: —';
+    ui.chipVelocity.textContent = '↑ 0.000';
+    ui.cameraPlaceholder.classList.remove('hidden');
+    ui.videoEl.classList.remove('visible');
+  }
+
+  /* ─────────────────────────────────────────
+     LIVE STATS
+  ───────────────────────────────────────── */
+  function refreshStats() {
+    const now     = state.mealActive ? Date.now() : (state.mealEndTime || Date.now());
+    const elapsed = state.mealStartTime ? now - state.mealStartTime : 0;
+    const count   = state.bites.length;
+    ui.statMealTime.textContent = formatDuration(elapsed);
+    ui.statBites.textContent    = count;
+    const avg = count > 0 ? state.bites.reduce((s,b)=>s+b.duration,0)/count : 0;
+    ui.statAvgDuration.textContent = (avg/1000).toFixed(1)+'s';
+    const pace = elapsed > 0 && count > 0 ? count/(elapsed/60000) : 0;
+    ui.statPace.textContent = pace.toFixed(1);
+  }
+
+  /* ─────────────────────────────────────────
+     TIMELINE
+  ───────────────────────────────────────── */
+  function addTimelineTick(biteStart) {
+    if (!state.mealStartTime) return;
+    const elapsed = Date.now() - state.mealStartTime;
+    if (elapsed <= 0) return;
+    const relMs = biteStart - state.mealStartTime;
+    const pct   = Math.max(0, Math.min((relMs/elapsed)*100, 100));
+    const tick  = document.createElement('div');
+    tick.className = 'timeline-tick';
+    tick.style.left = pct + '%';
+    tick.dataset.biteMs = relMs;
+    ui.timelineTrack.appendChild(tick);
+  }
+
+  function rescaleTimeline() {
+    const totalMs = state.mealEndTime - state.mealStartTime;
+    if (totalMs <= 0) return;
+    ui.timelineTrack.querySelectorAll('.timeline-tick').forEach(tick => {
+      const pct = Math.max(0, Math.min((parseFloat(tick.dataset.biteMs)/totalMs)*100, 100));
+      tick.style.left = pct + '%';
+    });
+  }
+
+  /* ─────────────────────────────────────────
+     SUMMARY + CHARTS
+  ───────────────────────────────────────── */
+  function cd() {
+    return { color: '#6b6460', font: { family: "'DM Mono', monospace", size: 11 } };
+  }
+
+  function renderSummary() {
+    const { bites, mealStartTime, mealEndTime } = state;
+    const mealMs = mealEndTime - mealStartTime;
+    const count  = bites.length;
+    const avgMs  = count > 0 ? bites.reduce((s,b)=>s+b.duration,0)/count : 0;
+    const pace   = count > 0 && mealMs > 0 ? count/(mealMs/60000) : 0;
+
+    ui.sumMealTime.textContent = formatDuration(mealMs);
+    ui.sumBites.textContent    = count;
+    ui.sumAvg.textContent      = (avgMs/1000).toFixed(1)+'s';
+    ui.sumPace.textContent     = pace.toFixed(1);
+
+    if (count === 0) return;
+
+    const durData = bites.map(b => +(b.duration/1000).toFixed(2));
+    const avgSec  = +(avgMs/1000).toFixed(2);
+
+    if (state.charts.durations) state.charts.durations.destroy();
+    state.charts.durations = new Chart(document.getElementById('chartBiteDurations'), {
+      type: 'bar',
+      data: {
+        labels: bites.map((_,i) => `#${i+1}`),
+        datasets: [
+          { label:'Duration (s)', data:durData, backgroundColor:durData.map(d=>d>avgSec?'rgba(212,119,10,0.85)':'rgba(212,119,10,0.35)'), borderColor:'rgba(212,119,10,1)', borderWidth:1, borderRadius:4 },
+          { type:'line', label:'Average', data:durData.map(()=>avgSec), borderColor:'#c0392b', borderDash:[5,3], borderWidth:1.5, pointRadius:0, fill:false },
+        ],
+      },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{...cd(),boxWidth:12} } }, scales:{ x:{ticks:{...cd(),maxRotation:0},grid:{color:'rgba(0,0,0,0.05)'}}, y:{ticks:{...cd(),callback:v=>v+'s'},grid:{color:'rgba(0,0,0,0.05)'},beginAtZero:true} } },
+    });
+
+    const BUCKET = 10000;
+    const buckets = Math.max(1, Math.ceil(mealMs/BUCKET));
+    const counts  = new Array(buckets).fill(0);
+    bites.forEach(b => { const idx=Math.min(Math.floor((b.start-mealStartTime)/BUCKET),buckets-1); counts[idx]++; });
+    const smooth = counts.map((c,i,a) => { const s=a.slice(Math.max(0,i-1),i+2); return +(s.reduce((x,y)=>x+y,0)/s.length*6).toFixed(1); });
+
+    if (state.charts.pace) state.charts.pace.destroy();
+    state.charts.pace = new Chart(document.getElementById('chartPace'), {
+      type: 'line',
+      data: { labels:counts.map((_,i)=>formatDuration(i*BUCKET)), datasets:[{ label:'Bites / min', data:smooth, borderColor:'#2e7d4f', backgroundColor:'rgba(46,125,79,0.08)', borderWidth:2, pointRadius:3, pointBackgroundColor:'#2e7d4f', fill:true, tension:0.4 }] },
+      options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{...cd(),boxWidth:12} } }, scales:{ x:{ticks:{...cd(),maxRotation:30},grid:{color:'rgba(0,0,0,0.05)'}}, y:{ticks:{...cd(),callback:v=>v+'/min'},grid:{color:'rgba(0,0,0,0.05)'},beginAtZero:true} } },
+    });
+
+    if (count >= 2) {
+      const gaps   = bites.slice(1).map((b,i) => +((b.start-bites[i].end)/1000).toFixed(2));
+      const avgGap = gaps.reduce((s,g)=>s+g,0)/gaps.length;
+      if (state.charts.gaps) state.charts.gaps.destroy();
+      state.charts.gaps = new Chart(document.getElementById('chartGaps'), {
+        type: 'bar',
+        data: { labels:gaps.map((_,i)=>`${i+1}→${i+2}`), datasets:[{ label:'Gap (s)', data:gaps, backgroundColor:gaps.map(g=>g>avgGap*1.5?'rgba(63,99,160,0.8)':'rgba(63,99,160,0.35)'), borderColor:'rgba(63,99,160,1)', borderWidth:1, borderRadius:4 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ labels:{...cd(),boxWidth:12} } }, scales:{ x:{ticks:{...cd(),maxRotation:30},grid:{color:'rgba(0,0,0,0.05)'}}, y:{ticks:{...cd(),callback:v=>v+'s'},grid:{color:'rgba(0,0,0,0.05)'},beginAtZero:true} } },
+      });
+    }
+  }
+
+  /* ─────────────────────────────────────────
+     SURVEY SUBMISSION
+  ───────────────────────────────────────── */
+  async function submitSurvey(e) {
+    e.preventDefault();
+    const food=ui.fieldFood.value.trim(), context=ui.fieldContext.value, stress=ui.fieldStress.value, distraction=ui.fieldDistraction.value, notes=ui.fieldNotes.value.trim();
+    if (!context||!stress||!distraction) { showSubmitStatus('Please fill in all required fields.','error'); return; }
+    const { bites, mealStartTime, mealEndTime } = state;
+    const mealMs=mealStartTime&&mealEndTime?mealEndTime-mealStartTime:0;
+    const biteDurs=bites.map(b=>+((b.duration/1000).toFixed(2)));
+    const avgDur=biteDurs.length?+(biteDurs.reduce((s,d)=>s+d,0)/biteDurs.length).toFixed(2):0;
+    const pace=mealMs>0&&bites.length>0?+(bites.length/(mealMs/60000)).toFixed(2):0;
+    const date=new Date().toISOString().slice(0,10);
+    const identifier=`anonymous_${food||'unknown'}_${date}`;
+    ui.btnSubmit.disabled=true;
+    showSubmitStatus('Sending…','');
+    try {
+      const res=await fetch(CONFIG.DATAFOUNDRY_URL,{method:'POST',headers:{'Content-Type':'application/json','api_token':CONFIG.DATAFOUNDRY_TOKEN,'resource_id':identifier,'token':identifier},body:JSON.stringify({detection_method:'camera',food,context,stress,distraction,notes,meal_time_seconds:parseFloat((mealMs/1000).toFixed(1)),bite_count:bites.length,avg_bite_duration:avgDur,pace_bites_per_min:pace,bite_durations:biteDurs.join(',')})});
+      if (res.ok) { showSubmitStatus('Submitted successfully! ✓','success'); ui.btnSubmit.textContent='Submitted ✓'; }
+      else throw new Error(`HTTP ${res.status}`);
+    } catch (err) { showSubmitStatus('Submission failed: '+err.message,'error'); ui.btnSubmit.disabled=false; }
+  }
+
+  function showSubmitStatus(msg,type) { ui.submitStatus.hidden=false; ui.submitStatus.textContent=msg; ui.submitStatus.className='submit-status '+type; }
+
+  /* ─────────────────────────────────────────
+     UTILITIES
+  ───────────────────────────────────────── */
+  function formatDuration(ms) {
+    const s=Math.floor(ms/1000);
+    return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+  }
+
+  let biteFlashTimer=null;
+  function flashBiteIndicator() {
+    ui.biteIndicator.classList.add('visible');
+    clearTimeout(biteFlashTimer);
+    biteFlashTimer=setTimeout(()=>ui.biteIndicator.classList.remove('visible'),700);
+  }
+
+  let cameraFlashTimer=null;
+  function flashCameraOverlay() {
+    ui.biteFlash.classList.add('flash');
+    clearTimeout(cameraFlashTimer);
+    cameraFlashTimer=setTimeout(()=>ui.biteFlash.classList.remove('flash'),300);
+  }
+
+  function setPhasePill(phase) {
+    const labels={idle:'idle',active:'wrist rising ↑',settling:'settling…'};
+    ui.phasePill.textContent=labels[phase]||phase;
+    ui.phasePill.className=`phase-pill phase-${phase}`;
+    ui.signalPhaseLabel.textContent=`(${labels[phase]||phase})`;
+  }
+
+  function setCameraStatus(text,s) {
+    ui.cameraStatusText.textContent=text;
+    ui.cameraStatusText.style.color=s===true?'var(--success)':s===false?'var(--danger)':'var(--text-secondary)';
+  }
+
+  const BADGE={idle:'Idle',ready:'Ready',eating:'Eating',done:'Done'};
+  function setStatusBadge(s) { ui.statusBadge.textContent=BADGE[s]||s; ui.statusBadge.className=`status-badge status-${s}`; }
+
+  /* ─────────────────────────────────────────
+     EVENT LISTENERS
+  ───────────────────────────────────────── */
+  ui.btnCamera.addEventListener('click',   enableCamera);
+  ui.btnStart.addEventListener('click',    startMeal);
+  ui.btnEnd.addEventListener('click',      endMeal);
+  ui.btnReset.addEventListener('click',    resetAll);
+  ui.surveyForm.addEventListener('submit', submitSurvey);
+  </script>
+</body>
+</html>
